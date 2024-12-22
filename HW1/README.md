@@ -51,3 +51,7 @@
     * отображение распределения температур в разрезе сезонов с помощью боксплотов
     * отображение множества аномальных температур (по скользящему среднему) по датам в виде датафрейма
 
+![temp_app_1](app_screenshots/temp_1.png)
+![temp_app_2](app_screenshots/temp_2.png)
+![temp_app_3](app_screenshots/temp_3.png)
+![temp_app_4](app_screenshots/temp_4.png)
