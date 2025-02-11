@@ -10,7 +10,9 @@ from middleware import LoggingMiddleware
 
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher(storage=MemoryStorage())
-dp.update.middleware(LoggingMiddleware())
+dp.message.middleware(LoggingMiddleware())
+dp.callback_query.middleware(LoggingMiddleware())
+
 
 ### хранение данных пользователей в памяти
 users = {}

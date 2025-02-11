@@ -1,18 +1,29 @@
 import logging
-import sys
 from aiogram import BaseMiddleware
 from aiogram.types import Message, CallbackQuery
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - User ID: %(user_id)s - Text: %(text)s",
-    datefmt="%Y-%m-%d %H:%M:%S",
-    handlers=[logging.StreamHandler(sys.stdout)]  # Use stdout for logs
-)
+### логирование в консоль
+formatter = logging.Formatter("%(asctime)s - INFO - %(log_type)s: %(content)s", datefmt="%Y-%m-%d %H:%M:%S")
+console_handler = logging.StreamHandler()
+console_handler.setFormatter(formatter)
+
+logger = logging.getLogger("bot_logger")
+logger.setLevel(logging.INFO)
+logger.addHandler(console_handler)
+
 
 class LoggingMiddleware(BaseMiddleware):
-    async def on_pre_process_message(self, message: Message, data: dict):
-        logging.info("", extra={"user_id": message.from_user.id, "text": message.text})
+    async def __call__(self, handler, event, data):
+        log_data = {"log_type": "", "content": ""}
 
-    async def on_pre_process_callback_query(self, callback: CallbackQuery, data: dict):
-        logging.info("", extra={"user_id": callback.from_user.id, "text": callback.data})
+        if isinstance(event, Message) and event.text:
+            log_data["log_type"] = "Text"
+            log_data["content"] = event.text
+        elif isinstance(event, CallbackQuery) and event.data:
+            log_data["log_type"] = "Button"
+            log_data["content"] = event.data
+
+        if log_data["log_type"]: ### только текст или кнопки в боте
+            logger.info("", extra=log_data)
+
+        return await handler(event, data)
