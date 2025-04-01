@@ -48,4 +48,4 @@ class LinkStats(BaseModel):
     expires_at: datetime
     clicks: int
     last_used_at: Optional[datetime]
-    expired: bool
+    is_active: bool

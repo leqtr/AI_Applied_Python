@@ -1,7 +1,7 @@
 fastapi~=0.115.12
 uvicorn[standard]
-sqlalchemy>=1.4  # поддержка AsyncSession
-asyncpg          # драйвер PostgreSQL для async SQLAlchemy
+sqlalchemy>=1.4
+asyncpg
 redis[asyncio]>=4.2.0   # асинхронный клиент Redis
 python-jose[cryptography]  # JWT
 passlib[bcrypt]~=1.7.4

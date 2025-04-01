@@ -26,6 +26,8 @@ from utils import (
     generate_short_code,
     strip_tz,
 )
+from archive import archive_expired_links
+import asyncio
 
 load_dotenv()
 
@@ -37,6 +39,18 @@ CACHE_TTL_SECONDS = int(os.getenv("CACHE_TTL_SECONDS", 86400)) ### 1 день
 
 app = FastAPI()
 r = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, db=REDIS_DB)
+
+### BACKGROUND EXPIRED LINKS CLEANER
+
+@app.on_event("startup")
+async def startup_event():
+    asyncio.create_task(run_archiver())
+
+
+async def run_archiver():
+    while True:
+        await archive_expired_links()
+        await asyncio.sleep(60 * 10)  # every 10 minutes
 
 ### ROUTES
 
@@ -100,12 +114,6 @@ async def shorten_original_link(
             raise HTTPException(status_code=400, detail="Alias already taken")
 
         short_code = link.custom_alias
-    # else:
-    #     while True:
-    #         short_code = generate_short_code()
-    #         result = await db.execute(select(Link).where(Link.short_code == short_code))
-    #         if not result.scalar_one_or_none():
-    #             break
     else:
         max_attempts = 5
         for _ in range(max_attempts):
@@ -146,7 +154,7 @@ async def redirect_short_link(
     if cached_url:
         url = cached_url.decode()
     else:
-        result = await db.execute(select(Link).where(Link.short_code == short_code))
+        result = await db.execute(select(Link).where(Link.short_code == short_code, Link.is_active == True))
         link = result.scalars().first()
 
         if not link:
@@ -154,8 +162,8 @@ async def redirect_short_link(
 
         expires_at = strip_tz(link.expires_at)
 
-        if expires_at and expires_at < datetime.utcnow():
-            raise HTTPException(status_code=404, detail="Link has already expired")
+        if not link.is_active:
+            raise HTTPException(status_code=404, detail="Link has expired")
 
         url = link.original_url
         await r.setex(cache_key, CACHE_TTL_SECONDS, url)
@@ -184,8 +192,10 @@ async def update_short_link(
     if not link:
         raise HTTPException(status_code=404, detail="Link not found")
 
-    existing_expiry = strip_tz(link.expires_at)
-    if existing_expiry and existing_expiry < datetime.utcnow():
+    # existing_expiry = strip_tz(link.expires_at)
+    # if existing_expiry and existing_expiry < datetime.utcnow():
+    #     raise HTTPException(status_code=400, detail="Link has already expired")
+    if not link.is_active:
         raise HTTPException(status_code=400, detail="Link has already expired")
 
     link.original_url = str(data.original_url)
@@ -223,12 +233,11 @@ async def stats_short_link(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user)
 ):
-    result = await db.execute(select(Link).where((Link.short_code == short_code) & (Link.user_id == user.id)))
+    result = await db.execute(select(Link).where((Link.short_code == short_code) & (Link.user_id == user.id) & (Link.is_active == True)))
     link = result.scalars().first()
     if not link:
         raise HTTPException(status_code=404, detail="Link not found")
 
-    now = datetime.utcnow()
     return LinkStats(
         original_url=link.original_url,
         short_code=link.short_code,
@@ -236,7 +245,7 @@ async def stats_short_link(
         expires_at=link.expires_at,
         clicks=link.clicks,
         last_used_at=link.last_used_at,
-        expired=link.expires_at is not None and link.expires_at < now
+        is_active=link.is_active
     )
 
 @app.get("/links/{original_url:path}/stats", response_model=List[LinkStats])
@@ -246,16 +255,16 @@ async def stats_original_link(
     user: User = Depends(get_current_user)
 ):
     result = await db.execute(
-        select(Link).where(Link.original_url == original_url, Link.user_id == user.id)
+        select(Link).where((Link.original_url == original_url) & (Link.user_id == user.id) & (Link.is_active == True))
     )
     links = result.scalars().all()
 
     if not links:
         raise HTTPException(status_code=404, detail="No links found for this URL")
 
-    now = datetime.utcnow()
+    # now = datetime.utcnow()
 
-    ### сортировка по кол-ву кликов
+    ### сортировка активных ссылок по кол-ву кликов
     sorted_links = sorted(links, key=lambda link: link.clicks, reverse=True)
 
     return [
@@ -266,7 +275,8 @@ async def stats_original_link(
             expires_at=link.expires_at,
             clicks=link.clicks,
             last_used_at=link.last_used_at,
-            expired=link.expires_at is not None and link.expires_at < now
+            is_active=link.is_active
+            # expired=link.expires_at is not None and link.expires_at < now
         )
         for link in sorted_links
     ]
@@ -286,18 +296,18 @@ async def search_for_short_link(
     if not links:
         raise HTTPException(status_code=404, detail="No links found for this URL")
 
-    now = datetime.utcnow()
+    # now = datetime.utcnow()
 
     links_with_expired = [
         {
             "short_code": link.short_code,
             "created_at": link.created_at,
             "expires_at": link.expires_at,
-            "expired": link.expires_at is not None and link.expires_at < now
+            "is_active": link.is_active
         }
         for link in links
     ]
     ### сначала неистекшие ссылки, а потом по дате создания
-    sorted_links = sorted(links_with_expired, key=lambda x: (x["expired"], x["created_at"]))
+    sorted_links = sorted(links_with_expired, key=lambda x: (not x["is_active"], x["created_at"]))
 
     return sorted_links
