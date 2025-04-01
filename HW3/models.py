@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, ForeignKey, DateTime, Text
+from sqlalchemy import Column, Integer, String, ForeignKey, DateTime, Text, Boolean
 from sqlalchemy.orm import relationship
 from datetime import datetime
 from pydantic import BaseModel, HttpUrl
@@ -27,6 +27,7 @@ class Link(Base):
     expires_at = Column(DateTime, nullable=True)
     clicks = Column(Integer, default=0)
     last_used_at = Column(DateTime, nullable=True)
+    is_active = Column(Boolean, default=True, nullable=False)
 
     owner = relationship("User", back_populates="links")
 
