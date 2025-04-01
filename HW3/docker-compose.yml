@@ -8,7 +8,7 @@ services:
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: postgres
+      POSTGRES_DB: shortener  # ✅ Create this database at startup
     ports:
       - "5432:5432"
     volumes:
@@ -39,6 +39,7 @@ services:
     environment:
       - REDIS_HOST=redis
       - POSTGRES_HOST=postgres-db
+      - DATABASE_URL=postgresql+asyncpg://postgres:postgres@postgres-db:5432/shortener  # ✅ Correct connection string
 
 volumes:
   postgres_data:
