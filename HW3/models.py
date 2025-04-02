@@ -37,15 +37,19 @@ class LinkCreate(BaseModel):
     custom_alias: Optional[str] = None
     expires_at: Optional[datetime] = None
 
-class LinkUpdate(BaseModel):
+class LinkUpdateOriginalUrl(BaseModel):
     original_url: HttpUrl
-    expires_at: Optional[datetime] = None
+
+class LinkUpdateExpiration(BaseModel):
+    new_expires_at: datetime
+class LinkRevive(BaseModel):
+    new_expires_at: Optional[datetime] = None
 
 class LinkStats(BaseModel):
     original_url: str
     short_code: str
     created_at: datetime
-    expires_at: datetime
+    expires_at: Optional[datetime]
     clicks: int
     last_used_at: Optional[datetime]
     is_active: bool

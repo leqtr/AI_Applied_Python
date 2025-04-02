@@ -15,7 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
 from database import get_db
-from models import User, Link, LinkCreate, LinkUpdate, LinkStats
+from models import User, Link, LinkCreate, LinkUpdateOriginalUrl, LinkUpdateExpiration, LinkRevive, LinkStats
 from auth import (
     get_current_user,
     create_access_token,
@@ -154,7 +154,7 @@ async def redirect_short_link(
     if cached_url:
         url = cached_url.decode()
     else:
-        result = await db.execute(select(Link).where(Link.short_code == short_code, Link.is_active == True))
+        result = await db.execute(select(Link).where(Link.short_code == short_code))
         link = result.scalars().first()
 
         if not link:
@@ -173,43 +173,146 @@ async def redirect_short_link(
 
     return RedirectResponse(url)
 
-@app.put("/links/{short_code}")
-async def update_short_link(
+@app.put("/links/{short_code}/update-url")
+async def update_original_url(
     short_code: str,
-    data: LinkUpdate,
+    new_url: LinkUpdateOriginalUrl,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user)
 ):
-    new_expires_at = strip_tz(data.expires_at)
-
-    if new_expires_at and new_expires_at < datetime.utcnow():
-        raise HTTPException(status_code=400, detail="Expiration date must be in the future")
+    if not user:
+        raise HTTPException(status_code=401, detail="Authentication required")
 
     result = await db.execute(
-        select(Link).where((Link.short_code == short_code) & (Link.user_id == user.id))
+        select(Link).where(Link.short_code == short_code, Link.user_id == user.id)
     )
     link = result.scalars().first()
+
     if not link:
         raise HTTPException(status_code=404, detail="Link not found")
 
-    # existing_expiry = strip_tz(link.expires_at)
-    # if existing_expiry and existing_expiry < datetime.utcnow():
-    #     raise HTTPException(status_code=400, detail="Link has already expired")
     if not link.is_active:
-        raise HTTPException(status_code=400, detail="Link has already expired")
+        raise HTTPException(status_code=400, detail="Link has expired")
 
-    link.original_url = str(data.original_url)
-    link.expires_at = new_expires_at
+    link.original_url = str(new_url.original_url).strip().lower()
+
+    await db.commit()
+    await r.delete(f"short:{short_code}")
+
+    return {"message": "Original URL updated successfully"}
+
+@app.put("/links/{short_code}/update-expiration")
+async def update_expiration(
+    short_code: str,
+    new_expires_at: LinkUpdateExpiration,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user)
+):
+    if not user:
+        raise HTTPException(status_code=401, detail="Authentication required")
+
+    new_expires_at_value = strip_tz(new_expires_at.new_expires_at)
+
+    if new_expires_at_value and new_expires_at_value < datetime.utcnow():
+        raise HTTPException(status_code=400, detail="Expiration date must be in the future")
+
+    result = await db.execute(
+        select(Link).where(Link.short_code == short_code, Link.user_id == user.id)
+    )
+    link = result.scalars().first()
+
+    if not link:
+        raise HTTPException(status_code=404, detail="Link not found")
+
+    if not link.is_active:
+        raise HTTPException(status_code=400, detail="Link has expired")
+
+    link.expires_at = new_expires_at_value
+    await db.commit()
+    await r.delete(f"short:{short_code}")
+
+    return {
+        "message": "Expiration date updated successfully",
+        "short_code": short_code,
+        "new_expires_at": link.expires_at
+    }
+
+@app.put("/links/{short_code}/revive")
+async def revive_link(
+    short_code: str,
+    data: LinkRevive,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user)
+):
+    if not user:
+        raise HTTPException(status_code=401, detail="Authentication required")
+
+    new_expires_at = strip_tz(data.new_expires_at)
+
+    if new_expires_at and new_expires_at < datetime.utcnow():
+        raise HTTPException(status_code=400, detail="New expiration date must be in the future")
+
+    result = await db.execute(
+        select(Link).where(Link.short_code == short_code, Link.user_id == user.id)
+    )
+    link = result.scalars().first()
+
+    if not link:
+        raise HTTPException(status_code=404, detail="Link not found")
+
+    if link.is_active:
+        raise HTTPException(status_code=400, detail="Link is already active")
+
+    link.is_active = True
+    link.expires_at = new_expires_at or None
 
     await db.commit()
     await r.delete(f"short:{short_code}")
 
     return {
-        "message": "Link updated successfully",
-        "short_code": short_code,
+        "message": "Link has been revived",
+        "short_code": link.short_code,
         "new_expires_at": link.expires_at
     }
 
+# @app.put("/links/{short_code}")
+# async def update_short_link(
+#     short_code: str,
+#     data: LinkUpdate,
+#     db: AsyncSession = Depends(get_db),
+#     user: User = Depends(get_current_user)
+# ):
+# if not user:
+#         raise HTTPException(status_code=401, detail="Authentication required")
+#     new_expires_at = strip_tz(data.expires_at)
+#
+#     if new_expires_at and new_expires_at < datetime.utcnow():
+#         raise HTTPException(status_code=400, detail="Expiration date must be in the future")
+#
+#     result = await db.execute(
+#         select(Link).where((Link.short_code == short_code) & (Link.user_id == user.id))
+#     )
+#     link = result.scalars().first()
+#     if not link:
+#         raise HTTPException(status_code=404, detail="Link not found")
+#
+#     # existing_expiry = strip_tz(link.expires_at)
+#     # if existing_expiry and existing_expiry < datetime.utcnow():
+#     #     raise HTTPException(status_code=400, detail="Link has already expired")
+#     if not link.is_active:
+#         raise HTTPException(status_code=400, detail="Link has already expired")
+#
+#     link.original_url = str(data.original_url)
+#     link.expires_at = new_expires_at
+#
+#     await db.commit()
+#     await r.delete(f"short:{short_code}")
+#
+#     return {
+#         "message": "Link updated successfully",
+#         "short_code": short_code,
+#         "new_expires_at": link.expires_at
+#     }
 
 @app.delete("/links/{short_code}")
 async def delete_short_link(
@@ -217,10 +320,13 @@ async def delete_short_link(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user)
 ):
+    if not user:
+        raise HTTPException(status_code=401, detail="Authentication required")
+
     result = await db.execute(select(Link).where((Link.short_code == short_code) & (Link.user_id == user.id)))
     link = result.scalars().first()
     if not link:
-        raise HTTPException(status_code=404, detail="Links not found")
+        raise HTTPException(status_code=404, detail="Link not found")
 
     await db.delete(link)
     await db.commit()
@@ -233,6 +339,9 @@ async def stats_short_link(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user)
 ):
+    if not user:
+        raise HTTPException(status_code=401, detail="Authentication required")
+
     result = await db.execute(select(Link).where((Link.short_code == short_code) & (Link.user_id == user.id) & (Link.is_active == True)))
     link = result.scalars().first()
     if not link:
@@ -254,6 +363,9 @@ async def stats_original_link(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user)
 ):
+    if not user:
+        raise HTTPException(status_code=401, detail="Authentication required")
+
     result = await db.execute(
         select(Link).where((Link.original_url == original_url) & (Link.user_id == user.id) & (Link.is_active == True))
     )
@@ -288,6 +400,9 @@ async def search_for_short_link(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user)
 ):
+    if not user:
+        raise HTTPException(status_code=401, detail="Authentication required")
+
     result = await db.execute(
         select(Link).where(Link.original_url == original_url, Link.user_id == user.id)
     )
